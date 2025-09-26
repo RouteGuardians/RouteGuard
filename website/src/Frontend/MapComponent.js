@@ -3,7 +3,9 @@ import { MapContainer, TileLayer, Marker, Circle, Polyline, useMapEvents, useMap
 import "leaflet/dist/leaflet.css";
 import L from 'leaflet';
 
-// Fix for default marker icon issue with webpack
+// --- Helper Components & Functions ---
+
+// Fix for default marker icon issue
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
@@ -11,154 +13,149 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-// Helper function to calculate distance between two lat/lng points in meters
-function haversineDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Earth's radius in meters
-  const φ1 = lat1 * Math.PI / 180;
-  const φ2 = lat2 * Math.PI / 180;
-  const Δφ = (lat2 - lat1) * Math.PI / 180;
-  const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c; // in meters
-}
-
-
-// Fit map to route
-function FitBounds({ route }) {
+function FitBounds({ bounds }) {
   const map = useMap();
   useEffect(() => {
-    if (route && route.length > 0) {
-        const bounds = L.latLngBounds(route);
-        map.fitBounds(bounds, { padding: [50, 50] });
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [50, 50] });
     }
-  }, [route, map]);
+  }, [bounds, map]);
   return null;
 }
 
-// Component to capture clicks on the map
 function ClickHandler({ setPoint, label, onPointSelected }) {
   useMapEvents({
     click(e) {
       const { lat, lng } = e.latlng;
       setPoint(`${lng.toFixed(6)},${lat.toFixed(6)}`);
-      alert(`${label} set at ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
-      onPointSelected(); // Callback to reset selection mode
+      onPointSelected();
     }
   });
   return null;
 }
 
+// Simple Modal Component
+function RerouteModal({ onReroute, onCancel }) {
+  const modalStyle = {
+    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+    zIndex: 2000, background: 'white', padding: '20px', borderRadius: '8px',
+    boxShadow: '0 4px 15px rgba(0,0,0,0.2)', textAlign: 'center'
+  };
+  const buttonStyle = { margin: '0 10px', padding: '10px 20px', border: 'none', borderRadius: '5px', cursor: 'pointer' };
+
+  return (
+    <div style={modalStyle}>
+      <h4>Unsafe Route Detected</h4>
+      <p>The suggested path passes through a restricted zone.</p>
+      <div>
+        <button onClick={onReroute} style={{...buttonStyle, background: '#28a745', color: 'white'}}>Find Safe Route</button>
+        <button onClick={onCancel} style={{...buttonStyle, background: '#dc3545', color: 'white'}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// Main Map Component
 function MapComponent() {
   const [redZones, setRedZones] = useState([]);
-  const [route, setRoute] = useState(null);
-  const [start, setStart] = useState("77.2090,28.6139"); // Default Delhi
-  const [end, setEnd] = useState("80.9462,26.8467");     // Default Lucknow
-  const [selecting, setSelecting] = useState(null);       // "start" or "end"
+  const [safeRoute, setSafeRoute] = useState(null);
+  const [unsafeRoute, setUnsafeRoute] = useState(null);
+  const [start, setStart] = useState("77.2090,28.6139");
+  const [end, setEnd] = useState("80.9462,26.8467");
+  const [selecting, setSelecting] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     fetch("http://localhost:5000/api/redzones")
       .then(res => res.json())
       .then(data => setRedZones(data));
   }, []);
-
-  // Correctly checks if a point is inside any red zone using its specific radius
-  const isInsideRedZone = (lat, lng) => {
-    return redZones.some(zone => {
-      const distance = haversineDistance(lat, lng, zone.coordinates[0], zone.coordinates[1]);
-      return distance < zone.radius; // Compare distance in meters to radius in meters
-    });
-  };
+  
+  const formatCoords = (routeData) => {
+    return routeData.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+  }
 
   const getRoute = async () => {
-    // Clear previous route
-    setRoute(null);
+    setSafeRoute(null);
+    setUnsafeRoute(null);
+    setIsLoading(true);
 
-    const [startLng, startLat] = start.split(",").map(Number);
-    const [endLng, endLat] = end.split(",").map(Number);
+    const res = await fetch(`http://localhost:5000/api/route?start=${start}&end=${end}`);
+    const data = await res.json();
+    
+    setIsLoading(false);
 
-    // Prevent API call if start or end is in a restricted area
-    if (isInsideRedZone(startLat, startLng)) {
-      alert("Error: Your starting point is inside a restricted red zone. Please select a different location.");
-      return; // Stop the function
-    }
-    if (isInsideRedZone(endLat, endLng)) {
-      alert("Error: Your destination is inside a restricted red zone. Please select a different location.");
-      return; // Stop the function
-    }
-
-    try {
-        const res = await fetch(`http://localhost:5000/api/route?start=${start}&end=${end}`);
-        if (!res.ok) {
-            const errorData = await res.json();
-            throw new Error(errorData.error || "Failed to fetch route");
-        }
-        const data = await res.json();
-        if (data.routes && data.routes.length > 0) {
-            // OSRM returns [lng, lat], Leaflet needs [lat, lng], so we swap them
-            const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-            setRoute(coords);
-        } else {
-            alert("Could not find a route. Please try different locations.");
-        }
-    } catch (error) {
-        console.error("Routing error:", error);
-        alert(`An error occurred: ${error.message}`);
+    if (data.status === "safe") {
+      setSafeRoute(formatCoords(data.route));
+    } else if (data.status === "unsafe") {
+      setUnsafeRoute(formatCoords(data.route));
+      setShowModal(true);
+    } else {
+      alert(data.message || "An error occurred.");
     }
   };
-  
-  // Parse coordinates safely
-  const startCoords = start ? start.split(",").map(Number) : [77.2090, 28.6139];
-  const endCoords = end ? end.split(",").map(Number) : [80.9462, 26.8467];
+
+  const handleReroute = async () => {
+    setShowModal(false);
+    setIsLoading(true);
+
+    const res = await fetch(`http://localhost:5000/api/reroute?start=${start}&end=${end}`);
+    const data = await res.json();
+    
+    setIsLoading(false);
+
+    if (data.status === "safe") {
+      setUnsafeRoute(null); // Clear the old unsafe route
+      setSafeRoute(formatCoords(data.route));
+    } else if (data.status === "no_safe_alternatives_found") {
+      alert("Could not find a safe alternative route. Please try different start or end points.");
+    } else {
+      alert(data.message || "An error occurred while rerouting.");
+    }
+  };
+
+  const startCoords = start.split(",").map(Number);
+  const endCoords = end.split(",").map(Number);
+  const polylineForBounds = safeRoute || unsafeRoute;
+  const bounds = polylineForBounds ? L.latLngBounds(polylineForBounds) : null;
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
+        {isLoading && <div style={{position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', zIndex: 1999, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><h2>Loading...</h2></div>}
+        {showModal && <RerouteModal onReroute={handleReroute} onCancel={() => setShowModal(false)} />}
+        
       <MapContainer center={[27.5, 79]} zoom={6} style={{ height: "100%", width: "100%" }}>
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
         {redZones.map((zone, idx) => (
-          <Circle
-            key={idx}
-            center={[zone.coordinates[0], zone.coordinates[1]]} // [lat, lng]
-            radius={zone.radius} // in meters
-            color="red"
-            fillColor="#f03"
-            fillOpacity={0.5}
-          />
+          <Circle key={idx} center={zone.coordinates} radius={zone.radius} color="red" fillColor="#f03" fillOpacity={0.4} />
         ))}
-
-        {route && <Polyline positions={route} color="blue" weight={5}/>}
         
-        {/* Leaflet expects [lat, lng] */}
+        {/* Draw unsafe route in red, safe route in blue */}
+        {unsafeRoute && <Polyline positions={unsafeRoute} color="red" weight={5} opacity={0.8} />}
+        {safeRoute && <Polyline positions={safeRoute} color="blue" weight={5} />}
+
         <Marker position={[startCoords[1], startCoords[0]]} />
         <Marker position={[endCoords[1], endCoords[0]]} />
 
-        {/* Click handler for map */}
         {selecting && <ClickHandler 
             setPoint={selecting === 'start' ? setStart : setEnd} 
             label={selecting === 'start' ? 'Start' : 'End'}
-            onPointSelected={() => setSelecting(null)} // Deactivate selection mode after click
+            onPointSelected={() => setSelecting(null)}
         />}
 
-        {route && <FitBounds route={route} />}
+        {bounds && <FitBounds bounds={bounds} />}
       </MapContainer>
 
-      <div style={{ position: "absolute", top: 10, left: 50, zIndex: 1000, background: "white", padding: "10px", borderRadius: "5px", border: "1px solid #ccc", boxShadow: "0 2px 5px rgba(0,0,0,0.2)" }}>
-        <div style={{ marginBottom: '10px' }}>
-          <label>Start (lng,lat): </label>
-          <input value={start} readOnly style={{ border: '1px solid #ddd', padding: '2px' }}/>
-          <button onClick={() => setSelecting("start")} style={{ marginLeft: "5px" }}>Set on Map</button>
-        </div>
-        <div style={{ marginBottom: '10px' }}>
-          <label>End (lng,lat): </label>
-          <input value={end} readOnly style={{ border: '1px solid #ddd', padding: '2px' }}/>
-          <button onClick={() => setSelecting("end")} style={{ marginLeft: "5px" }}>Set on Map</button>
-        </div>
-        <button onClick={getRoute} style={{ marginTop: "10px", width: "100%", padding: "8px 10px", cursor: "pointer", background: '#28a745', color: 'white', border: 'none', borderRadius: '4px' }}>Get Safe Route</button>
+      <div style={{ position: "absolute", top: 10, left: 50, zIndex: 1000, background: "white", padding: "10px", borderRadius: "5px", border: "1px solid #ccc" }}>
+          <button onClick={getRoute} style={{ width: "100%", padding: "8px 10px", cursor: "pointer", background: '#007bff', color: 'white', border: 'none' }}>
+            {isLoading ? "Calculating..." : "Get Route"}
+          </button>
+          <div style={{marginTop: '10px'}}>
+            <button onClick={() => setSelecting("start")} style={{ marginRight: '5px' }}>Set Start</button>
+            <button onClick={() => setSelecting("end")}>Set End</button>
+          </div>
       </div>
     </div>
   );
