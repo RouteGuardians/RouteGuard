@@ -92,10 +92,14 @@ function MapComponent() {
       allCoords.push(endParam);
       const coordStr = allCoords.join(";");
 
-      const res = await fetch(`http://localhost:5000/route?coords=${coordStr}`);
+      // ✅ THIS IS THE CHANGED LOGIC
+      const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const apiUrl = isLocal ? "http://localhost:5000" : "https://routeguard.onrender.com";
+      
+      const res = await fetch(`${apiUrl}/route?coords=${coordStr}`);
+
       const data = await res.json();
 
-      // ✅ FIX: Only error if routes missing
       if (!data.route || !data.route.routes || !data.route.routes.length) {
         alert("No route found.");
       } else {
@@ -136,7 +140,7 @@ function MapComponent() {
         setVehiclePos(route[i]);
         i++;
       } else clearInterval(interval);
-    }, 300); // faster animation
+    }, 300);
     return () => clearInterval(interval);
   }, [route]);
 
@@ -162,11 +166,10 @@ function MapComponent() {
       setLogs((l) => [...l, `⏰ ENTER red zone at ${new Date().toLocaleTimeString()}`]);
       logCooldown.current = true;
 
-      // Start police timer
       if (!redZoneTimer.current) {
         redZoneTimer.current = setTimeout(() => {
           alert("⚠ Vehicle still inside red zone. Informing police...");
-        }, 10000); // 10 sec inside zone
+        }, 10000);
       }
 
       setTimeout(() => {
