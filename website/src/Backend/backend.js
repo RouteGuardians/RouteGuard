@@ -26,7 +26,18 @@ function inRedZone(lat, lon) {
 function routeUnsafe(route) {
   return route.geometry.coordinates.some(([lon, lat]) => inRedZone(lat, lon));
 }
+// Check if point is inside red zone
+app.get("/check", (req, res) => {
+  const { lat, lon } = req.query;
+  if (!lat || !lon) return res.status(400).json({ error: "Missing lat/lon" });
+  res.json({ inRedZone: inRedZone(parseFloat(lat), parseFloat(lon)) });
+});
 
+// Dummy loitering detection API
+app.get("/loitering", (req, res) => {
+  const randomCount = Math.floor(Math.random() * 50); // simulate people count
+  res.json({ count: randomCount });
+});
 app.get("/route", async (req, res) => {
   // **FIX**: The frontend now sends all coordinates in a single 'coords' parameter
   const { coords } = req.query; 
