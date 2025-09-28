@@ -26,6 +26,9 @@ function inRedZone(lat, lon) {
 function routeUnsafe(route) {
   return route.geometry.coordinates.some(([lon, lat]) => inRedZone(lat, lon));
 }
+app.get("/",(req,res)=>{
+  res.send("Backend is running")
+});
 // Check if point is inside red zone
 app.get("/check", (req, res) => {
   const { lat, lon } = req.query;
