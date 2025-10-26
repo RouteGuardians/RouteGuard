@@ -5,6 +5,7 @@ import {
   Marker,
   Polyline,
   Polygon,
+  Popup,
   useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -12,15 +13,21 @@ import L from "leaflet";
 
 // ----------------- Custom Icons -----------------
 const vehicleIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", // small car icon
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
   iconSize: [30, 30],
   iconAnchor: [15, 15],
 });
 
 const destIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854878.png", // green marker
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854878.png",
   iconSize: [30, 30],
   iconAnchor: [15, 30],
+});
+
+const loiteringIcon = new L.Icon({
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/3686/3686930.png",
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
 });
 
 // ----------------- Click Handler -----------------
@@ -51,10 +58,59 @@ function MapComponent() {
   const logCooldown = useRef(false);
   const redZoneTimer = useRef(null);
 
+  // Loitering detection states
+  const [loiteringData, setLoiteringData] = useState(null);
+  const [showLoiteringOverlay, setShowLoiteringOverlay] = useState(false);
+  const [analyzingVideo, setAnalyzingVideo] = useState(false);
+
   const redZones = [
     { lat: 28.6139, lon: 77.2090, radius: 700 },
     { lat: 26.8467, lon: 80.9462, radius: 500 },
   ];
+
+  // Function to call loitering detection API
+  const analyzeLoitering = async () => {
+    setAnalyzingVideo(true);
+    try {
+      console.log('Calling loitering detection API...');
+      
+      // Use the test endpoint that analyzes video directly from server
+      const apiResponse = await fetch('http://127.0.0.1:8000/analyze-test', {
+        method: 'POST',
+      });
+      
+      console.log('API Response status:', apiResponse.status);
+      
+      if (!apiResponse.ok) {
+        const errorData = await apiResponse.json();
+        throw new Error(errorData.error || `API returned ${apiResponse.status}`);
+      }
+      
+      const data = await apiResponse.json();
+      console.log('Analysis result:', data);
+      
+      // Map the API response to include coordinates from red zones
+      const enrichedReport = data.report.map((obj, idx) => ({
+        ...obj,
+        lat: redZones[idx % redZones.length].lat,
+        lon: redZones[idx % redZones.length].lon
+      }));
+      
+      setLoiteringData({
+        ...data,
+        report: enrichedReport
+      });
+      setShowLoiteringOverlay(true);
+      
+      setLogs((l) => [...l, `📹 Analysis Complete: ${data.report.length} objects, Status: ${data.assessment} at ${new Date().toLocaleTimeString()}`]);
+    } catch (error) {
+      console.error('Loitering detection error:', error);
+      setLogs((l) => [...l, `❌ Error: ${error.message} at ${new Date().toLocaleTimeString()}`]);
+      alert(`Loitering detection failed: ${error.message}`);
+    } finally {
+      setAnalyzingVideo(false);
+    }
+  };
 
   // ----------------- Red Zone Polygons -----------------
   const getRedZonePolygons = () =>
@@ -121,13 +177,51 @@ function MapComponent() {
   };
 
   // ----------------- Unsafe Route Handlers -----------------
-  const handleAcceptUnsafe = () => {
+  const handleAcceptUnsafe = async () => {
+    setShowUnsafePrompt(false);
+    
     if (pendingRoute) {
       setRoute(formatRoute(pendingRoute.route));
       setUnsafeRoute(true);
+      setPendingRoute(null);
+      
+      // Run loitering detection immediately
+      setAnalyzingVideo(true);
+      try {
+        console.log('Running loitering detection...');
+        
+        const apiResponse = await fetch('http://127.0.0.1:8000/analyze-test', {
+          method: 'POST',
+        });
+        
+        if (!apiResponse.ok) {
+          throw new Error(`API error: ${apiResponse.status}`);
+        }
+        
+        const data = await apiResponse.json();
+        console.log('Loitering detection result:', data);
+        
+        // Add coordinates to detections
+        const enrichedReport = data.report.map((obj, idx) => ({
+          ...obj,
+          lat: redZones[idx % redZones.length].lat,
+          lon: redZones[idx % redZones.length].lon
+        }));
+        
+        setLoiteringData({
+          ...data,
+          report: enrichedReport
+        });
+        setShowLoiteringOverlay(true);
+        
+        setLogs((l) => [...l, `📹 ${data.assessment} - ${data.report.length} objects at ${new Date().toLocaleTimeString()}`]);
+      } catch (error) {
+        console.error('Loitering detection failed:', error);
+        setLogs((l) => [...l, `❌ Detection Error: ${error.message}`]);
+      } finally {
+        setAnalyzingVideo(false);
+      }
     }
-    setShowUnsafePrompt(false);
-    setPendingRoute(null);
   };
 
   const handleFindSafeRoute = () => {
@@ -189,10 +283,11 @@ function MapComponent() {
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
-      {(isLoading || showUnsafePrompt) && (
+      {(isLoading || showUnsafePrompt || analyzingVideo) && (
         <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.7)", zIndex: 1999, color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {isLoading && !showUnsafePrompt && <h2>Calculating Route...</h2>}
-          {showUnsafePrompt && (
+          {isLoading && !showUnsafePrompt && !analyzingVideo && <h2>Calculating Route...</h2>}
+          {analyzingVideo && <h2>🎥 Analyzing Surveillance Footage...</h2>}
+          {showUnsafePrompt && !analyzingVideo && (
             <div style={{ background: "#333", padding: "20px 40px", borderRadius: "8px", textAlign: "center", border: "1px solid #555" }}>
               <h3>⚠️ Unsafe Route Detected</h3>
               <p>The fastest route passes through a designated red zone.</p>
@@ -214,6 +309,25 @@ function MapComponent() {
         {end && <Marker position={end.split(",").map(Number)} icon={destIcon} />}
         {waypoints.map((wp, idx) => (<Marker key={idx} position={wp.split(",").map(Number)} />))}
         {vehiclePos && <Marker position={vehiclePos} icon={vehicleIcon} />}
+        
+        {/* Loitering Detection Markers */}
+        {showLoiteringOverlay && loiteringData && loiteringData.report.map((obj) => (
+          <Marker 
+            key={`loiter-${obj.object_id}`} 
+            position={[obj.lat, obj.lon]}
+            icon={loiteringIcon}
+          >
+            <Popup>
+              <div>
+                <strong>⚠️ Loitering Alert</strong><br/>
+                Object ID: {obj.object_id}<br/>
+                Time: {obj.max_loiter_time.toFixed(1)}s<br/>
+                Status: {obj.status}
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
         {selecting && <ClickHandler onClick={(point) => { if (selecting === "start") setStart(point); if (selecting === "end") setEnd(point); setSelecting(null); }} />}
         {addingWaypoint && <ClickHandler onClick={addWaypointAndRecalculate} />}
       </MapContainer>
@@ -231,6 +345,29 @@ function MapComponent() {
         <button onClick={() => setNavRunning(!navRunning)} style={{ width: "100%", padding: 8, marginTop: 5, background: navRunning ? "#dc3545" : "#28a745", color: "white", border: "none" }}>
           {navRunning ? "Stop Navigation" : "Resume Navigation"}
         </button>
+
+        {/* Loitering Info Panel */}
+        {showLoiteringOverlay && loiteringData && (
+          <div style={{ marginTop: 10, padding: 10, background: "#ffebee", borderRadius: 5, border: "1px solid #f44336" }}>
+            <strong style={{ color: "#d32f2f" }}>⚠️ Loitering Analysis</strong>
+            <p style={{ margin: "5px 0", fontSize: "12px" }}>{loiteringData.assessment}</p>
+            <div style={{ fontSize: "11px", maxHeight: 100, overflow: "auto" }}>
+              <div><strong>Objects:</strong> {loiteringData.report.length}</div>
+              {loiteringData.report.map((obj) => (
+                <div key={obj.object_id} style={{ marginBottom: 5, color: obj.status === "ALERT" ? "#d32f2f" : "#666" }}>
+                  ID {obj.object_id}: {obj.max_loiter_time.toFixed(1)}s - {obj.status}
+                </div>
+              ))}
+            </div>
+            <button 
+              onClick={() => setShowLoiteringOverlay(false)}
+              style={{ width: "100%", padding: 5, marginTop: 5, fontSize: "11px", background: "#666", color: "white", border: "none", cursor: "pointer" }}
+            >
+              Hide Overlay
+            </button>
+          </div>
+        )}
+
         <div style={{ marginTop: 10, fontSize: "12px", maxHeight: 150, overflow: "auto" }}>
           <b>Logs:</b>
           <ul>{logs.map((log, idx) => (<li key={idx}>{log}</li>))}</ul>
