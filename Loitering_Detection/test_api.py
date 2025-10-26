@@ -1,7 +1,7 @@
 import requests
 
 url = "http://127.0.0.1:8000/analyze"
-files = {'video': open('vid1.mp4', 'rb')}
+files = {'video': open('Loitering_Detection\\vid4.webm', 'rb')}
 
 response = requests.post(url, files=files)
 data = response.json()

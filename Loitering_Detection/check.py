@@ -5,8 +5,8 @@ import sys # Added sys import for exit calls
 
 # --- CONFIGURATION CONSTANTS ---
 # Setting the video source to the file you uploaded for immediate testing.
-VIDEO_SOURCE = 'vid1.mp4' 
-
+VIDEO_SOURCE = 'Loitering_Detection\\vid4.webm'  # Change to your test video file path
+cap = cv2.VideoCapture(VIDEO_SOURCE)
 # Time (in seconds) an object must remain relatively still in the ROI to be flagged as loitering.
 # Reset to 5 seconds, as 1 second is usually too sensitive for loitering.
 LOITERING_TIME_THRESHOLD = 2
@@ -14,8 +14,9 @@ LOITERING_TIME_THRESHOLD = 2
 # Region of Interest (ROI) for Loitering Detection (x, y, width, height)
 # Adjusted to cover a large portion of the frame to capture the person in 'vid2.webm'.
 # NOTE: If your video resolution is very high, you might still need to increase ROI_W/ROI_H.
-ROI_X, ROI_Y, ROI_W, ROI_H = 0, 0, 1000, 800 
-
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+ROI_X, ROI_Y, ROI_W, ROI_H = 0, 0, frame_width, frame_height
 # Minimum area (in pixels) for a detected contour to be considered a moving object (prevents noise).
 MIN_CONTOUR_AREA = 1000
 
@@ -135,7 +136,7 @@ class LoiteringDetector:
                 movement = np.linalg.norm(np.array(obj_data['last_position']) - np.array(current_centroid))
                 
                 # Check for significant movement (e.g., more than 10 pixels since last frame)
-                if movement < 10:
+                if movement < 45:
                     obj_data['loitering_timer'] += time_diff
                 else:
                     # Significant movement resets the loitering timer

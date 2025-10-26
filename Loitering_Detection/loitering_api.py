@@ -75,7 +75,7 @@ class LoiteringDetector:
                 delta = current_time - obj['last_time']
                 movement = np.linalg.norm(np.array(obj['last_position']) - np.array(centroid))
 
-                if movement < 10:
+                if movement < 45:
                     obj['loitering_timer'] += delta
                 else:
                     obj['loitering_timer'] = 0.0
