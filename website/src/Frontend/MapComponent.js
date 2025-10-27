@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import AlertsTable from "./Alerts"; 
+import AlertsTable from "./Alerts";
 import {
   MapContainer,
   TileLayer,
@@ -12,20 +12,18 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
 // ----------------- Custom Icons -----------------
-
 const vehicleIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png", // small car icon
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/684/684908.png",
   iconSize: [30, 30],
   iconAnchor: [15, 15],
 });
 
 const destIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854878.png", // green marker
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/854/854878.png",
   iconSize: [30, 30],
   iconAnchor: [15, 30],
 });
 
-// ----------------- Click Handler -----------------
 function ClickHandler({ onClick }) {
   useMapEvents({
     click(e) {
@@ -50,7 +48,9 @@ function MapComponent() {
   const [pendingRoute, setPendingRoute] = useState(null);
   const [vehiclePos, setVehiclePos] = useState(null);
   const [logs, setLogs] = useState([]);
-  const [navRunning, setNavRunning] = useState(true);
+  const [navRunning, setNavRunning] = useState(false);
+  const [showAlertsPanel, setShowAlertsPanel] = useState(false);
+
   const logCooldown = useRef(false);
   const redZoneTimer = useRef(null);
 
@@ -59,42 +59,53 @@ function MapComponent() {
     { lat: 26.8467, lon: 80.9462, radius: 500 },
   ];
 
+  // ----------------- Fetch Alerts -----------------
+  useEffect(() => {
+    const fetchAlerts = async () => {
+      try {
+        const isLocal =
+          window.location.hostname === "localhost" ||
+          window.location.hostname === "127.0.0.1";
+        const apiUrl = isLocal
+          ? "http://localhost:5000"
+          : "https://routeguard.onrender.com";
+        const res = await fetch(`${apiUrl}/alerts`);
+        const data = await res.json();
+        setAlerts(data);
+      } catch (err) {
+        console.error("Failed to fetch alerts:", err);
+      }
+    };
+    fetchAlerts();
+  }, []);
 
-useEffect(() => {
-  const fetchAlerts = async () => {
-    try {
-      const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const apiUrl = isLocal ? "http://localhost:5000" : "https://routeguard.onrender.com";
-
-      const res = await fetch(`${apiUrl}/alerts`);
-      const data = await res.json();
-      setAlerts(data);
-    } catch (err) {
-      console.error("Failed to fetch alerts:", err);
-    }
-  };
-  fetchAlerts();
-}, []);
-
-  // ----------------- Red Zone Polygons -----------------
   const getRedZonePolygons = () =>
     redZones.map((zone, idx) => {
       const coords = [];
       const segments = 32;
       for (let i = 0; i < segments; i++) {
         const angle = (i / segments) * 2 * Math.PI;
-        const dx = (zone.radius * Math.cos(angle)) / (111320 * Math.cos((zone.lat * Math.PI) / 180));
+        const dx =
+          (zone.radius * Math.cos(angle)) /
+          (111320 * Math.cos((zone.lat * Math.PI) / 180));
         const dy = (zone.radius * Math.sin(angle)) / 111000;
         coords.push([zone.lat + dy, zone.lon + dx]);
       }
       coords.push(coords[0]);
-      return <Polygon key={idx} positions={coords} color="red" fillColor="#f03" fillOpacity={0.4} />;
+      return (
+        <Polygon
+          key={idx}
+          positions={coords}
+          color="red"
+          fillColor="#f03"
+          fillOpacity={0.4}
+        />
+      );
     });
 
   const formatRoute = (osrmData) =>
     osrmData.routes[0].geometry.coordinates.map((c) => [c[1], c[0]]);
 
-  // ----------------- Fetch Route -----------------
   const fetchRoute = async (currentWaypoints, avoidRedZones = false) => {
     if (!start || !end) return alert("Please select a start and end point first.");
     setIsLoading(true);
@@ -103,7 +114,9 @@ useEffect(() => {
 
     try {
       const wpParam = currentWaypoints.length
-        ? currentWaypoints.map((wp) => wp.split(",").reverse().join(",")).join(";")
+        ? currentWaypoints
+            .map((wp) => wp.split(",").reverse().join(","))
+            .join(";")
         : "";
       const startParam = start.split(",").reverse().join(",");
       const endParam = end.split(",").reverse().join(",");
@@ -112,8 +125,12 @@ useEffect(() => {
       allCoords.push(endParam);
       const coordStr = allCoords.join(";");
 
-      const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const apiUrl = isLocal ? "http://localhost:5000" : "https://routeguard.onrender.com";
+      const isLocal =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      const apiUrl = isLocal
+        ? "http://localhost:5000"
+        : "https://routeguard.onrender.com";
 
       let url = `${apiUrl}/route?coords=${coordStr}`;
       if (avoidRedZones) url += "&avoidRedZones=true";
@@ -126,7 +143,6 @@ useEffect(() => {
       } else {
         setRoute(formatRoute(data.route));
         setUnsafeRoute(data.unsafe);
-
         if (data.unsafe && !avoidRedZones) {
           setPendingRoute(data);
           setShowUnsafePrompt(true);
@@ -145,6 +161,7 @@ useEffect(() => {
     if (pendingRoute) {
       setRoute(formatRoute(pendingRoute.route));
       setUnsafeRoute(true);
+      setShowAlertsPanel(true); // ✅ show loitering alerts only after unsafe route
     }
     setShowUnsafePrompt(false);
     setPendingRoute(null);
@@ -174,6 +191,22 @@ useEffect(() => {
     fetchRoute(newWps, false);
   };
 
+  // ----------------- Stop Navigation -----------------
+  const handleStopNavigation = async () => {
+    setNavRunning(false);
+    setVehiclePos(null);
+    setLogs([]);
+    setShowAlertsPanel(false);
+    // 🔄 Reset database
+    const isLocal =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1";
+    const apiUrl = isLocal
+      ? "http://localhost:5000"
+      : "https://routeguard.onrender.com";
+    await fetch(`${apiUrl}/reset-alerts`, { method: "DELETE" });
+  };
+
   // ----------------- Vehicle Animation -----------------
   useEffect(() => {
     if (!route || !navRunning) return;
@@ -189,17 +222,29 @@ useEffect(() => {
   useEffect(() => {
     if (!vehiclePos) return;
     const inside = redZones.some((zone) => {
-      const dist = 111000 * Math.sqrt(Math.pow(vehiclePos[0] - zone.lat, 2) + Math.pow((vehiclePos[1] - zone.lon) * Math.cos((zone.lat * Math.PI) / 180), 2));
+      const dist =
+        111000 *
+        Math.sqrt(
+          Math.pow(vehiclePos[0] - zone.lat, 2) +
+            Math.pow(
+              (vehiclePos[1] - zone.lon) * Math.cos((zone.lat * Math.PI) / 180),
+              2
+            )
+        );
       return dist < zone.radius;
     });
     if (inside && !logCooldown.current) {
       setLogs((l) => [...l, `⏰ ENTER red zone at ${new Date().toLocaleTimeString()}`]);
       logCooldown.current = true;
       if (!redZoneTimer.current) {
-        redZoneTimer.current = setTimeout(() => alert("⚠ Vehicle in red zone for 10s. Informing authorities..."), 10000);
+        redZoneTimer.current = setTimeout(
+          () => alert("⚠ Vehicle in red zone for 10s. Informing authorities..."),
+          10000
+        );
       }
-
-      setTimeout(() => { logCooldown.current = false; }, 2000);
+      setTimeout(() => {
+        logCooldown.current = false;
+      }, 2000);
     }
     if (!inside && redZoneTimer.current) {
       clearTimeout(redZoneTimer.current);
@@ -209,104 +254,223 @@ useEffect(() => {
   }, [vehiclePos]);
 
   return (
+    <div style={{ display: "flex", height: "100vh", width: "100%" }}>
+      {/* ------------ Map Section ------------ */}
+      <div style={{ flex: 3, position: "relative" }}>
+        {isLoading && (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              background: "rgba(0,0,0,0.7)",
+              zIndex: 1999,
+              color: "white",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <h2>Calculating Route...</h2>
+          </div>
+        )}
 
-    <div style={{ height: "100vh", width: "100%", position: "relative" }}>
-      {(isLoading || showUnsafePrompt) && (
-        <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.7)", zIndex: 1999, color: "white", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {isLoading && !showUnsafePrompt && <h2>Calculating Route...</h2>}
-          {showUnsafePrompt && (
-            <div style={{ background: "#333", padding: "20px 40px", borderRadius: "8px", textAlign: "center", border: "1px solid #555" }}>
+        {showUnsafePrompt && (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              background: "rgba(0,0,0,0.7)",
+              zIndex: 1999,
+              color: "white",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              style={{
+                background: "#333",
+                padding: "20px 40px",
+                borderRadius: "8px",
+                textAlign: "center",
+                border: "1px solid #555",
+              }}
+            >
               <h3>⚠️ Unsafe Route Detected</h3>
               <p>The fastest route passes through a designated red zone.</p>
-              <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                <button onClick={handleAcceptUnsafe} style={{ padding: "12px", background: "#c82333", color: "white", border: "none", cursor: "pointer", fontSize: "16px" }}>Accept Unsafe Route</button>
-                <button onClick={handleFindSafeRoute} style={{ padding: "12px", background: "#218838", color: "white", border: "none", cursor: "pointer", fontSize: "16px" }}>Find a Safer Route</button>
-                <button onClick={handleAddWaypointChoice} style={{ padding: "12px", background: "#0069d9", color: "white", border: "none", cursor: "pointer", fontSize: "16px" }}>Add Waypoint to Avoid</button>
+              <div
+                style={{
+                  marginTop: "20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                <button
+                  onClick={handleAcceptUnsafe}
+                  style={{
+                    padding: "12px",
+                    background: "#c82333",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                  }}
+                >
+                  Accept Unsafe Route
+                </button>
+                <button
+                  onClick={handleFindSafeRoute}
+                  style={{
+                    padding: "12px",
+                    background: "#218838",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                  }}
+                >
+                  Find Safer Route
+                </button>
+                <button
+                  onClick={handleAddWaypointChoice}
+                  style={{
+                    padding: "12px",
+                    background: "#0069d9",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "16px",
+                  }}
+                >
+                  Add Waypoint to Avoid
+                </button>
               </div>
             </div>
+          </div>
+        )}
+
+        <MapContainer
+          center={[27.5, 79]}
+          zoom={6}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          {getRedZonePolygons()}
+          {route && (
+            <Polyline
+              positions={route}
+              color={unsafeRoute ? "orange" : "blue"}
+              weight={5}
+            />
           )}
-        </div>
-        
-      )}
+          {start && <Marker position={start.split(",").map(Number)} />}
+          {end && <Marker position={end.split(",").map(Number)} icon={destIcon} />}
+          {waypoints.map((wp, idx) => (
+            <Marker key={idx} position={wp.split(",").map(Number)} />
+          ))}
+          {vehiclePos && <Marker position={vehiclePos} icon={vehicleIcon} />}
+          {selecting && (
+            <ClickHandler
+              onClick={(point) => {
+                if (selecting === "start") setStart(point);
+                if (selecting === "end") setEnd(point);
+                setSelecting(null);
+              }}
+            />
+          )}
+          {addingWaypoint && <ClickHandler onClick={addWaypointAndRecalculate} />}
+        </MapContainer>
+      </div>
 
-      <MapContainer center={[27.5, 79]} zoom={6} style={{ height: "100%", width: "100%" }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        {getRedZonePolygons()}
-        {route && <Polyline positions={route} color={unsafeRoute ? "orange" : "blue"} weight={5} />}
-        {start && <Marker position={start.split(",").map(Number)} />}
-        {end && <Marker position={end.split(",").map(Number)} icon={destIcon} />}
-        {waypoints.map((wp, idx) => (<Marker key={idx} position={wp.split(",").map(Number)} />))}
-        {vehiclePos && <Marker position={vehiclePos} icon={vehicleIcon} />}
-        {selecting && <ClickHandler onClick={(point) => { if (selecting === "start") setStart(point); if (selecting === "end") setEnd(point); setSelecting(null); }} />}
-        {addingWaypoint && <ClickHandler onClick={addWaypointAndRecalculate} />}
-      </MapContainer>
+      {/* ------------ Control + Alerts Panel ------------ */}
+      <div
+        style={{
+          flex: 1.2,
+          padding: "15px",
+          background: "#f8f9fa",
+          borderLeft: "1px solid #ccc",
+          overflowY: "auto",
+        }}
+      >
+        <h3 style={{ marginBottom: "10px" }}>Route Controls</h3>
+        <p><strong>Start:</strong> {start || "Not set"}</p>
+        <p><strong>End:</strong> {end || "Not set"}</p>
 
-      <div style={{ position: "absolute", top: 10, left: 50, zIndex: 1000, background: "white", padding: 10, borderRadius: 5, boxShadow: "0 2px 10px rgba(0,0,0,0.2)" }}>
-        <div style={{ marginBottom: "10px" }}>
-          <p><strong>Start:</strong> {start || "Not set"}</p>
-          <p><strong>End:</strong> {end || "Not set"}</p>
-        </div>
-        <button onClick={() => setSelecting("start")} style={{ marginRight: 5 }}>Set Start</button>
+        <button onClick={() => setSelecting("start")} style={{ marginRight: 5 }}>
+          Set Start
+        </button>
         <button onClick={() => setSelecting("end")}>Set End</button>
-        <button onClick={handleGetRouteClick} style={{ width: "100%", padding: 8, marginTop: 10, background: "#007bff", color: "white", border: "none" }} disabled={isLoading || !start || !end}>
-          {isLoading ? "Calculating..." : "Get Route"}
-        </button>
-        <button onClick={() => setNavRunning(!navRunning)} style={{ width: "100%", padding: 8, marginTop: 5, background: navRunning ? "#dc3545" : "#28a745", color: "white", border: "none" }}>
-          {navRunning ? "Stop Navigation" : "Resume Navigation"}
-        </button>
-        <div style={{ marginTop: 10, fontSize: "12px", maxHeight: 150, overflow: "auto" }}>
+
+        <button
+  onClick={handleGetRouteClick}
+  style={{
+    width: "100%",
+    padding: 8,
+    marginTop: 10,
+    background: "#007bff",
+    color: "white",
+    border: "none",
+  }}
+  disabled={isLoading || !start || !end}
+>
+  {isLoading ? "Calculating..." : "Get Route"}
+</button>
+
+<button
+  onClick={() => setNavRunning(true)}
+  style={{
+    width: "100%",
+    padding: 8,
+    marginTop: 5,
+    background: "#28a745",
+    color: "white",
+    border: "none",
+  }}
+  disabled={!route}
+>
+  Start Navigation
+</button>
+
+<button
+  onClick={handleStopNavigation}
+  style={{
+    width: "100%",
+    padding: 8,
+    marginTop: 5,
+    background: "#dc3545",
+    color: "white",
+    border: "none",
+  }}
+>
+  Stop Navigation
+</button>
+
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: "12px",
+            maxHeight: 150,
+            overflow: "auto",
+          }}
+        >
           <b>Logs:</b>
           <ul>{logs.map((log, idx) => (<li key={idx}>{log}</li>))}</ul>
         </div>
 
-<div style={{
-  position: "absolute",
-  top: 10,
-  right: 10,
-  zIndex: 1000,
-  background: "white",
-  padding: 8,
-  borderRadius: 5,
-  maxHeight: "50vh",
-  overflowY: "auto",
-  width: 220,
-  fontSize: 12,
-  boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
-}}>
-  <h4 style={{ margin: "0 0 5px 0", fontSize: 14 }}>Alerts</h4>
-
-  {/* Red Zone Logs */}
-  {logs.filter(log => log.includes("red zone")).map((log, idx) => (
-    <div key={idx} style={{
-      background: "#ff4d4d",
-      color: "white",
-      padding: "3px 5px",
-      marginBottom: "3px",
-      borderRadius: "3px"
-    }}>
-      {log.split(" at ")[1]} ⚠ Vehicle
-    </div>
-  ))}
-
-  {/* Loitering Alerts */}
-  {alerts && alerts.slice(-5).map((alert, idx) => (
-    <div key={idx} style={{
-      background: "#f0ad4e",
-      color: "black",
-      padding: "3px 5px",
-      marginBottom: "3px",
-      borderRadius: "3px"
-    }}>
-      {new Date(alert.timestamp).toLocaleTimeString()} 👤 {alert.total_person}
-    </div>
-  ))}
-</div>
-
-
-
+        {showAlertsPanel && (
+          <div style={{ marginTop: 20 }}>
+            <AlertsTable alerts={alerts} />
+          </div>
+        )}
       </div>
     </div>
-    
   );
 }
 

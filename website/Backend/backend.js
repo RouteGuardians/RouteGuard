@@ -103,6 +103,16 @@ app.get("/alerts", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch alerts from database." });
   }
 });
+// 🧹 Reset all alerts in DB
+app.delete("/reset-alerts", async (req, res) => {
+  try {
+    await alertsCollection.deleteMany({});
+    res.json({ message: "All alerts reset successfully." });
+  } catch (err) {
+    console.error("Failed to reset alerts:", err);
+    res.status(500).json({ error: "Failed to reset alerts." });
+  }
+});
 
 
 // Check if a given point lies inside a red zone
