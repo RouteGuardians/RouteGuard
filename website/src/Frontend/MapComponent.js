@@ -370,7 +370,7 @@ function MapComponent() {
               weight={5}
             />
           )}
-          {start && <Marker position={start.split(",").map(Number)} />}
+          {start && <Marker position={start.split(",").map(Number)} icon={destIcon} />}
           {end && <Marker position={end.split(",").map(Number)} icon={destIcon} />}
           {waypoints.map((wp, idx) => (
             <Marker key={idx} position={wp.split(",").map(Number)} />

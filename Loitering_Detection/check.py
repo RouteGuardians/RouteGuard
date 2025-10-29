@@ -7,7 +7,7 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
 # --- CONFIGURATION CONSTANTS ---
-VIDEO_SOURCE = 'Loitering_Detection\\vid3.mp4'  # Change to your video path
+VIDEO_SOURCE = 'Loitering_Detection\\vid1.mp4'  # Change to your video path
 LOITERING_TIME_THRESHOLD = 2
 MIN_CONTOUR_AREA = 1000
 STANDING_ASPECT_RATIO_THRESHOLD = 1.2
